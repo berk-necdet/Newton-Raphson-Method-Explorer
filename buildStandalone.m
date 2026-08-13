@@ -1,0 +1,93 @@
+function [buildResults, installerPath] = buildStandalone()
+% BUILDSTANDALONE Build and package NewtonRaphsonApp for Windows.
+%
+% Requirements:
+%   - MATLAB Compiler
+%   - Windows (for a GUI executable without a console window)
+%
+% The generated installer uses RuntimeDelivery="web". The target computer
+% does not need MATLAB, but the installer downloads the matching MATLAB
+% Runtime components during installation.
+
+sourceFolder = fileparts(mfilename('fullpath'));
+appFile = fullfile(sourceFolder, 'NewtonRaphsonApp.m');
+buildFolder = fullfile(sourceFolder, 'standalone_build');
+installerFolder = fullfile(sourceFolder, 'installer');
+readmeFile = fullfile(sourceFolder, 'README_TR.md');
+runtimeCompatibilityDll = fullfile(matlabroot, 'bin', 'win64', ...
+    'libmwflproxycredentialapi.dll');
+
+if ~isfile(appFile)
+    error('buildStandalone:MissingApp', ...
+        'NewtonRaphsonApp.m was not found next to this build script.');
+end
+
+if ~ispc
+    error('buildStandalone:WindowsOnly', ...
+        'This script creates a Windows GUI executable and must run on Windows.');
+end
+
+if ~license('test', 'Compiler')
+    error('buildStandalone:CompilerRequired', ...
+        'A MATLAB Compiler license is required to build the standalone app.');
+end
+
+if isfolder(buildFolder) || isfolder(installerFolder)
+    error('buildStandalone:OutputExists', ...
+        ['standalone_build or installer already exists. ' ...
+         'Rename the old output ' ...
+         'folder before starting a new build.']);
+end
+
+if ~isfile(runtimeCompatibilityDll)
+    error('buildStandalone:MissingRuntimeCompatibilityDll', ...
+        ['The R2026a compatibility DLL was not found: %s\n' ...
+         'Repair the MATLAB installation before rebuilding.'], ...
+        runtimeCompatibilityDll);
+end
+
+buildResults = compiler.build.standaloneWindowsApplication(appFile, ...
+    'ExecutableName', 'NewtonRaphsonExplorer', ...
+    'ExecutableVersion', '1.1.0', ...
+    'OutputDir', buildFolder, ...
+    'Verbose', 'on');
+
+% R2026a Runtime's web installer can omit this transitive dependency even
+% though uifigure startup loads the proxy credential client that requires it.
+% Keeping it beside the executable lets the Windows loader resolve it before
+% MATLAB Runtime initializes.
+copyfile(runtimeCompatibilityDll, buildFolder);
+
+installerArguments = { ...
+    'ApplicationName', 'Newton-Raphson Method Explorer', ...
+    'InstallerName', 'NewtonRaphsonExplorerInstaller_v1.1.0', ...
+    'Version', '1.1.0', ...
+    'RuntimeDelivery', 'web', ...
+    'OutputDir', installerFolder, ...
+    'Summary', 'Interactive Newton-Raphson solver and teaching visualizer.', ...
+    'Description', ['Includes 18 predefined scenarios, a cursor-aware custom ' ...
+        'function calculator, analytical or numerical derivatives, animation, ' ...
+        'live calculations, STOP control, and iteration history.'], ...
+    'Verbose', 'on'};
+
+additionalInstallerFiles = {runtimeCompatibilityDll};
+if isfile(readmeFile)
+    additionalInstallerFiles{end + 1} = readmeFile;
+end
+installerArguments = [installerArguments, ...
+    {'AdditionalFiles', additionalInstallerFiles}]; %#ok<AGROW>
+
+compiler.package.installer(buildResults, installerArguments{:});
+
+installerCandidates = dir(fullfile(installerFolder, ...
+    'NewtonRaphsonExplorerInstaller*'));
+if isempty(installerCandidates)
+    installerPath = installerFolder;
+else
+    installerPath = fullfile(installerCandidates(1).folder, ...
+        installerCandidates(1).name);
+end
+
+fprintf('\nBuild complete.\nExecutable folder: %s\nInstaller: %s\n', ...
+    buildFolder, installerPath);
+end
